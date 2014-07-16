@@ -25,3 +25,4 @@ plugins/elements/gstqueue2.c
 plugins/elements/gsttypefindelement.c
 tools/gst-inspect.c
 tools/gst-launch.c
+tools/gst-typefind.c
