@@ -1587,11 +1587,15 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
     if (!destpad) {
       GST_CAT_DEBUG (GST_CAT_ELEMENT_PADS, "no pad %s:%s",
           GST_ELEMENT_NAME (dest), destpadname);
+      if (srcpad)
+        gst_object_unref (srcpad);
       return FALSE;
     } else {
       if (!(GST_PAD_DIRECTION (destpad) == GST_PAD_SINK)) {
         GST_CAT_DEBUG (GST_CAT_ELEMENT_PADS, "pad %s:%s is no sink pad",
             GST_DEBUG_PAD_NAME (destpad));
+        if (srcpad)
+          gst_object_unref (srcpad);
         gst_object_unref (destpad);
         return FALSE;
       }
@@ -1600,6 +1604,8 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
             "pad %s:%s is already linked to %s:%s",
             GST_DEBUG_PAD_NAME (destpad),
             GST_DEBUG_PAD_NAME (GST_PAD_PEER (destpad)));
+        if (srcpad)
+          gst_object_unref (srcpad);
         gst_object_unref (destpad);
         return FALSE;
       }
@@ -1763,10 +1769,14 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
                 return TRUE;
               }
               /* it failed, so we release the request pads */
-              if (srcpad)
+              if (srcpad) {
                 gst_element_release_request_pad (src, srcpad);
-              if (destpad)
+                gst_object_unref (srcpad);
+              }
+              if (destpad) {
                 gst_element_release_request_pad (dest, destpad);
+                gst_object_unref (destpad);
+              }
             }
             gst_caps_unref (srccaps);
             gst_caps_unref (destcaps);
