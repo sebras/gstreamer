@@ -1534,6 +1534,7 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
   GstPad *srcpad, *destpad;
   GstPadTemplate *srctempl, *desttempl;
   GstElementClass *srcclass, *destclass;
+  gboolean srcrequest, destrequest;
 
   /* checks */
   g_return_val_if_fail (GST_IS_ELEMENT (src), FALSE);
@@ -1544,11 +1545,17 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
       srcpadname ? srcpadname : "(any)", GST_ELEMENT_NAME (dest),
       destpadname ? destpadname : "(any)");
 
+  srcrequest = FALSE;
+  destrequest = FALSE;
+
+  GST_DEBUG ("%d %d", srcrequest, destrequest);
+
   /* get a src pad */
   if (srcpadname) {
     /* name specified, look it up */
     if (!(srcpad = gst_element_get_static_pad (src, srcpadname)))
-      srcpad = gst_element_get_request_pad (src, srcpadname);
+      if ((srcpad = gst_element_get_request_pad (src, srcpadname)))
+        srcrequest = TRUE;
     if (!srcpad) {
       GST_CAT_DEBUG (GST_CAT_ELEMENT_PADS, "no pad %s:%s",
           GST_ELEMENT_NAME (src), srcpadname);
@@ -1583,7 +1590,8 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
   if (destpadname) {
     /* name specified, look it up */
     if (!(destpad = gst_element_get_static_pad (dest, destpadname)))
-      destpad = gst_element_get_request_pad (dest, destpadname);
+      if ((destpad = gst_element_get_request_pad (dest, destpadname)))
+        destrequest = TRUE;
     if (!destpad) {
       GST_CAT_DEBUG (GST_CAT_ELEMENT_PADS, "no pad %s:%s",
           GST_ELEMENT_NAME (dest), destpadname);
@@ -1722,6 +1730,8 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
   if (destpadname) {
     GST_CAT_DEBUG (GST_CAT_ELEMENT_PADS, "no link possible from %s to %s:%s",
         GST_ELEMENT_NAME (src), GST_DEBUG_PAD_NAME (destpad));
+    if (destrequest)
+      gst_element_release_request_pad (dest, destpad);
     gst_object_unref (destpad);
     return FALSE;
   } else {

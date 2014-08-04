@@ -678,11 +678,21 @@ gst_linker_request_new_pad (GstElement * element, GstPadTemplate * templ,
 static void
 gst_linker_release_pad (GstElement * element, GstPad * pad)
 {
+  GstLinker *linker = GST_LINKER (element);
   gchar *pad_name = gst_pad_get_name (pad);
   GST_WARNING_OBJECT (element, "Releasing request pad \"%s\"", pad_name);
   g_free (pad_name);
   gst_pad_set_active (pad, FALSE);
   gst_element_remove_pad (element, pad);
+
+  if (linker->sinkpad0 == pad)
+    linker->sinkpad0 = NULL;
+  if (linker->sinkpad1 == pad)
+    linker->sinkpad1 = NULL;
+  if (linker->srcpad0 == pad)
+    linker->srcpad0 = NULL;
+  if (linker->srcpad1 == pad)
+    linker->srcpad1 = NULL;
 }
 
 static void
@@ -713,6 +723,19 @@ gst_linker_get_property (GObject * object, guint prop_id,
 }
 
 static void
+gst_linker_dump_state (GstLinker * linker)
+{
+  GST_ERROR_OBJECT (linker, "sinkpad0(%sallocated): %s",
+      linker->sinkpad0 ? "" : "un", linker->sinkpad0_config);
+  GST_ERROR_OBJECT (linker, "sinkpad1(%sallocated): %s",
+      linker->sinkpad1 ? "" : "un", linker->sinkpad1_config);
+  GST_ERROR_OBJECT (linker, "srcpad0(%sallocated): %s",
+      linker->srcpad0 ? "" : "un", linker->srcpad0_config);
+  GST_ERROR_OBJECT (linker, "srcpad1(%sallocated): %s",
+      linker->srcpad1 ? "" : "un", linker->srcpad1_config);
+}
+
+static void
 gst_linker_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
@@ -721,26 +744,108 @@ gst_linker_set_property (GObject * object, guint prop_id,
   GST_OBJECT_LOCK (linker);
   switch (prop_id) {
     case PROP_SINKPAD0:
-      linker->sinkpad0_config = g_value_dup_string (value);
-      GST_INFO_OBJECT (linker, "sinkpad0: %s", linker->sinkpad0_config);
+      if (linker->sinkpad0 == NULL) {
+        linker->sinkpad0_config = g_value_dup_string (value);
+        GST_INFO_OBJECT (linker, "sinkpad0: %s", linker->sinkpad0_config);
+      } else {
+        GST_ERROR_OBJECT (linker, "unable to reconfigure existing sinkpad0");
+        gst_linker_dump_state (linker);
+        abort ();
+      }
       break;
     case PROP_SINKPAD1:
-      linker->sinkpad1_config = g_value_dup_string (value);
-      GST_INFO_OBJECT (linker, "sinkpad1: %s", linker->sinkpad1_config);
+      if (linker->sinkpad1 == NULL) {
+        linker->sinkpad1_config = g_value_dup_string (value);
+        GST_INFO_OBJECT (linker, "sinkpad1: %s", linker->sinkpad1_config);
+      } else {
+        GST_ERROR_OBJECT (linker, "unable to reconfigure existing sinkpad1");
+        gst_linker_dump_state (linker);
+        abort ();
+      }
       break;
     case PROP_SRCPAD0:
-      linker->srcpad0_config = g_value_dup_string (value);
-      GST_INFO_OBJECT (linker, "srcpad0: %s", linker->srcpad0_config);
+      if (linker->srcpad0 == NULL) {
+        linker->srcpad0_config = g_value_dup_string (value);
+        GST_INFO_OBJECT (linker, "srcpad0: %s", linker->srcpad0_config);
+      } else {
+        GST_ERROR_OBJECT (linker, "unable to reconfigure existing srcpad0");
+        gst_linker_dump_state (linker);
+        abort ();
+      }
       break;
     case PROP_SRCPAD1:
-      linker->srcpad1_config = g_value_dup_string (value);
-      GST_INFO_OBJECT (linker, "srcpad1: %s", linker->srcpad1_config);
+      if (linker->srcpad1 == NULL) {
+        linker->srcpad1_config = g_value_dup_string (value);
+        GST_INFO_OBJECT (linker, "srcpad1: %s", linker->srcpad1_config);
+      } else {
+        GST_ERROR_OBJECT (linker, "unable to reconfigure existing srcpad1");
+        gst_linker_dump_state (linker);
+        abort ();
+      }
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
   }
   GST_OBJECT_UNLOCK (linker);
+}
+
+static void
+gst_linker_unlink_request_pad (const GValue * item, gpointer user_data)
+{
+  GstElement *linker = GST_ELEMENT (user_data);
+  GstPad *pad = g_value_get_object (item);
+  GstPadTemplate *templ = gst_pad_get_pad_template (pad);
+
+  if (GST_PAD_TEMPLATE_PRESENCE (templ) == GST_PAD_REQUEST) {
+    gst_element_release_request_pad (linker, pad);
+  }
+
+  gst_object_unref (templ);
+}
+
+static void
+gst_linker_release_request_pads (GstElement * linker)
+{
+  GstIterator *iter;
+  GstIteratorResult result;
+
+  iter = gst_element_iterate_pads (linker);
+  do {
+    result = gst_iterator_foreach (iter, gst_linker_unlink_request_pad, linker);
+  } while (result == GST_ITERATOR_RESYNC);
+  gst_iterator_free (iter);
+}
+
+static void
+gst_linker_count_request_pad (const GValue * item, gpointer user_data)
+{
+  guint *counter = (guint *) user_data;
+  GstPad *pad = g_value_get_object (item);
+  GstPadTemplate *templ = gst_pad_get_pad_template (pad);
+
+  if (GST_PAD_TEMPLATE_PRESENCE (templ) == GST_PAD_REQUEST) {
+    (*counter)++;
+  }
+
+  gst_object_unref (templ);
+}
+
+static guint
+gst_linker_count_request_pads (GstElement * linker)
+{
+  GstIterator *iter;
+  GstIteratorResult result;
+  guint counter = 0;
+
+  iter = gst_element_iterate_pads (linker);
+  do {
+    result =
+        gst_iterator_foreach (iter, gst_linker_count_request_pad, &counter);
+  } while (result == GST_ITERATOR_RESYNC);
+  gst_iterator_free (iter);
+
+  return counter;
 }
 
 static void
@@ -769,19 +874,19 @@ gst_linker_class_init (GstLinkerClass * klass)
   g_object_class_install_property (gobject_class, PROP_SINKPAD0,
       g_param_spec_string ("sinkpad0", "Sink pad 0",
           "Configuration of sinkpad0", "missing",
-          G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
+          G_PARAM_READWRITE | G_PARAM_CONSTRUCT | G_PARAM_STATIC_STRINGS));
   g_object_class_install_property (gobject_class, PROP_SINKPAD1,
       g_param_spec_string ("sinkpad1", "Sink pad 1",
           "Configuration of sinkpad1", "missing",
-          G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
+          G_PARAM_READWRITE | G_PARAM_CONSTRUCT | G_PARAM_STATIC_STRINGS));
   g_object_class_install_property (gobject_class, PROP_SRCPAD0,
       g_param_spec_string ("srcpad0", "Source pad 0",
           "Configuration of srcpad0", "missing",
-          G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
+          G_PARAM_READWRITE | G_PARAM_CONSTRUCT | G_PARAM_STATIC_STRINGS));
   g_object_class_install_property (gobject_class, PROP_SRCPAD1,
       g_param_spec_string ("srcpad1", "Source pad 1",
           "Configuration of srcpad1", "missing",
-          G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
+          G_PARAM_READWRITE | G_PARAM_CONSTRUCT | G_PARAM_STATIC_STRINGS));
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Linker", "Linking element", "Element used for testing linking",
@@ -802,66 +907,6 @@ gst_linker_init (GstLinker * linker)
 }
 
 
-static GstElement *
-create_linker (const gchar * name, const gchar * config)
-{
-  const gchar *sinkpad0_config = "missing";
-  const gchar *sinkpad1_config = "missing";
-  const gchar *srcpad0_config = "missing";
-  const gchar *srcpad1_config = "missing";
-  gchar **configs;
-  guint i;
-  GObject *linker;
-
-  configs = g_strsplit (config, " ", -1);
-  g_assert (g_strv_length (configs) <= 4);
-  for (i = 0; i < g_strv_length (configs); i++) {
-    if (g_str_has_prefix (configs[i], "sinkpad0:")) {
-      sinkpad0_config = configs[i] + strlen ("sinkpad0:");
-    } else if (g_str_has_prefix (configs[i], "sinkpad1:")) {
-      sinkpad1_config = configs[i] + strlen ("sinkpad1:");
-    } else if (g_str_has_prefix (configs[i], "srcpad0:")) {
-      srcpad0_config = configs[i] + strlen ("srcpad0:");
-    } else if (g_str_has_prefix (configs[i], "srcpad1:")) {
-      srcpad1_config = configs[i] + strlen ("srcpad1:");
-    }
-  }
-
-  linker = g_object_new (GST_TYPE_LINKER,
-      "name", name,
-      "sinkpad0", sinkpad0_config,
-      "sinkpad1", sinkpad1_config,
-      "srcpad0", srcpad0_config, "srcpad1", srcpad1_config, NULL);
-  g_strfreev (configs);
-
-  return GST_ELEMENT (linker);
-}
-
-static void
-link_pads (guint idx, gboolean expect_success,
-    const gchar * srcconfig, const gchar * srcpadname,
-    const gchar * sinkconfig, const gchar * sinkpadname)
-{
-  GstElement *src, *sink;
-
-  src = create_linker ("src", srcconfig);
-  sink = create_linker ("sink", sinkconfig);
-
-  if (gst_element_link_pads (src, srcpadname, sink, sinkpadname)) {
-    GST_ERROR ("%u", idx);
-  }
-
-/*
-  if (expect_success)
-    fail_unless (gst_element_link_pads (src, srcpadname, sink, sinkpadname));
-  else
-    fail_if (gst_element_link_pads (src, srcpadname, sink, sinkpadname));
-    */
-
-  gst_object_unref (src);
-  gst_object_unref (sink);
-}
-
 typedef enum
 {
   PAD_PRESENCE_MASK = 0x1,
@@ -875,6 +920,9 @@ static gchar *
 build_pad_config (PadConfig config)
 {
   GString *str;
+
+  if (config == PAD_UNSPECIFIED)
+    return g_strdup ("");
 
   str = g_string_new (NULL);
 
@@ -897,42 +945,22 @@ build_pad_config (PadConfig config)
 }
 
 static gchar *
-build_config (PadConfig srcpad0, PadConfig srcpad1, PadConfig sinkpad0,
-    PadConfig sinkpad1)
-{
-  GString *config = g_string_new (NULL);
-
-  if (srcpad0 != PAD_UNSPECIFIED) {
-    gchar *pad_config = build_pad_config (srcpad0);
-    g_string_append_printf (config, "srcpad0:%s ", pad_config);
-    g_free (pad_config);
-  }
-  if (srcpad1 != PAD_UNSPECIFIED) {
-    gchar *pad_config = build_pad_config (srcpad1);
-    g_string_append_printf (config, "srcpad1:%s ", pad_config);
-    g_free (pad_config);
-  }
-  if (sinkpad0 != PAD_UNSPECIFIED) {
-    gchar *pad_config = build_pad_config (sinkpad0);
-    g_string_append_printf (config, "sinkpad0:%s ", pad_config);
-    g_free (pad_config);
-  }
-  if (sinkpad1 != PAD_UNSPECIFIED) {
-    gchar *pad_config = build_pad_config (sinkpad1);
-    g_string_append_printf (config, "sinkpad1:%s ", pad_config);
-    g_free (pad_config);
-  }
-
-  return g_string_free (config, FALSE);
-}
-
-static gchar *
 build_padname (const gchar * name_prefix, const gchar * name_suffix)
 {
-  GString *name = g_string_new ("");
-  if (name_suffix != NULL)
-    g_string_append_printf (name, "%s_%s", name_prefix, name_suffix);
-  return g_string_free (name, FALSE);
+  if (name_suffix == NULL) {
+    return NULL;
+  } else {
+    GString *name = g_string_new (NULL);
+    if (name_suffix != NULL)
+      g_string_append_printf (name, "%s_%s", name_prefix, name_suffix);
+    return g_string_free (name, FALSE);
+  }
+}
+
+static void
+here (void)
+{
+  GST_ERROR ("HERE");
 }
 
 GST_START_TEST (test_element_link)
@@ -948,6 +976,10 @@ GST_START_TEST (test_element_link)
   guint srcsrc0, srcsrc1, srcsink;
   guint sinksink0, sinksink1, sinksrc;
   guint srcpad, sinkpad, idx;
+  GstElement *src, *sink;
+
+  src = g_object_new (GST_TYPE_LINKER, "name", "src", NULL);
+  sink = g_object_new (GST_TYPE_LINKER, "name", "sink", NULL);
 
   idx = 0;
   for (srcsrc0 = 0; srcsrc0 < PAD_COMBINATIONS; srcsrc0++) {
@@ -958,44 +990,84 @@ GST_START_TEST (test_element_link)
             for (sinksink1 = 0; sinksink1 < PAD_COMBINATIONS; sinksink1++) {
               for (srcpad = 0; srcpad < G_N_ELEMENTS (padnames); srcpad++) {
                 for (sinkpad = 0; sinkpad < G_N_ELEMENTS (padnames); sinkpad++) {
-                  gchar *src_config, *sink_config;
+                  gchar *srcsrc0_config, *srcsrc1_config, *srcsink_config;
+                  gchar *sinksink0_config, *sinksink1_config, *sinksrc_config;
                   gchar *src_padname, *sink_padname;
                   gboolean expectation = FALSE;
                   guint i;
+
+                  if ((idx % 10000) == 0)
+                    GST_ERROR ("Test: %4u", idx);
+
+                  if ((!(srcsrc0 & PAD_PRESENCE_MASK) &&
+                          !(srcsrc1 & PAD_PRESENCE_MASK) &&
+                          (srcsink & PAD_PRESENCE_MASK))) {
+                    GST_ERROR ("skipping %u", idx);
+                    idx++;
+                    continue;
+                  }
+                  if ((!(sinksink0 & PAD_PRESENCE_MASK) &&
+                          !(sinksink1 & PAD_PRESENCE_MASK) &&
+                          (sinksrc & PAD_PRESENCE_MASK))) {
+                    GST_ERROR ("skipping %u", idx);
+                    idx++;
+                    continue;
+                  }
+
+                  srcsrc0_config = build_pad_config (srcsrc0);
+                  srcsrc1_config = build_pad_config (srcsrc1);
+                  srcsink_config = build_pad_config (srcsink);
+                  sinksink0_config = build_pad_config (sinksink0);
+                  sinksink1_config = build_pad_config (sinksink1);
+                  sinksrc_config = build_pad_config (sinksrc);
+                  src_padname = build_padname ("src", padnames[srcpad]);
+                  sink_padname = build_padname ("sink", padnames[sinkpad]);
+
+                  GST_WARNING ("Test: %4u", idx);
+                  GST_WARNING ("srcsrc0: %s", srcsrc0_config);
+                  GST_WARNING ("srcsrc1: %s", srcsrc1_config);
+                  GST_WARNING ("srcsink: %s", srcsink_config);
+                  GST_WARNING ("sinksink0: %s", sinksink0_config);
+                  GST_WARNING ("sinksink1: %s", sinksink1_config);
+                  GST_WARNING ("sinksrc: %s", sinksrc_config);
+                  GST_WARNING ("pads: %s<->%s", src_padname, sink_padname);
 
                   for (i = 0; i < G_N_ELEMENTS (successes); i++)
                     if (successes[i] == idx)
                       expectation = TRUE;
 
-                  src_config =
-                      build_config (srcsrc0, srcsrc1, srcsink, PAD_UNSPECIFIED);
-                  sink_config =
-                      build_config (sinksrc, PAD_UNSPECIFIED, sinksink0,
-                      sinksink1);
+                  g_object_set (src, "srcpad0", srcsrc0_config, "srcpad1",
+                      srcsrc1_config, "sinkpad0", srcsink_config, NULL);
 
-                  if (!src_config || !sink_config) {
-                    g_free (src_config);
-                    g_free (sink_config);
-                    continue;
+                  g_object_set (sink, "sinkpad0", sinksink0_config, "sinkpad1",
+                      sinksink1_config, "srcpad0", sinksrc_config, NULL);
+
+                  g_free (srcsrc0_config);
+                  g_free (srcsrc1_config);
+                  g_free (srcsink_config);
+                  g_free (sinksink0_config);
+                  g_free (sinksink1_config);
+                  g_free (sinksrc_config);
+
+                  if (idx == atoi (getenv ("IDX"))) {
+                    here ();
                   }
 
-                  src_padname = build_padname ("src", padnames[srcpad]);
-                  sink_padname = build_padname ("sink", padnames[sinkpad]);
+                  if (gst_element_link_pads (src, src_padname, sink,
+                          sink_padname)) {
+                    GST_ERROR ("%u", idx);
+                    gst_element_unlink (src, sink);
+                    gst_linker_release_request_pads (src);
+                    gst_linker_release_request_pads (sink);
+                    if (expectation)
+                      GST_DEBUG ("MU");
+                  }
 
-                  if ((idx % 10000) == 0)
-                    GST_ERROR ("Test: %4u", idx);
-                  GST_WARNING ("Test: %4u", idx);
-                  GST_WARNING ("src: %s", src_config);
-                  GST_WARNING ("sink: %s", sink_config);
-                  GST_WARNING ("pads: %s<->%s", src_padname, sink_padname);
-
-                  link_pads (idx, expectation, src_config, src_padname,
-                      sink_config, sink_padname);
+                  fail_unless (gst_linker_count_request_pads (src) == 0);
+                  fail_unless (gst_linker_count_request_pads (sink) == 0);
 
                   g_free (src_padname);
                   g_free (sink_padname);
-                  g_free (src_config);
-                  g_free (sink_config);
 
                   idx++;
                 }
@@ -1006,6 +1078,9 @@ GST_START_TEST (test_element_link)
       }
     }
   }
+
+  gst_object_unref (src);
+  gst_object_unref (sink);
 }
 
 GST_END_TEST;
