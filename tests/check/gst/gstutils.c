@@ -676,16 +676,6 @@ gst_linker_request_new_pad (GstElement * element, GstPadTemplate * templ,
 
   if (g_strstr_len (config, -1, "unlinkable") != NULL) {
     gst_pad_set_link_function (*newpad, gst_linker_refuse_to_link);
-  } else if (g_strstr_len (config, -1, "unlinked") == NULL) {
-    if (GST_PAD_TEMPLATE_DIRECTION (templ) == GST_PAD_SINK) {
-      GstElement *fakesrc = gst_element_factory_make ("fakesrc", NULL);
-      g_assert (gst_element_link_pads (fakesrc, NULL, element, pad_name));
-    } else if (GST_PAD_TEMPLATE_DIRECTION (templ) == GST_PAD_SRC) {
-      GstElement *fakesink = gst_element_factory_make ("fakesink", NULL);
-      g_assert (gst_element_link_pads (element, pad_name, fakesink, NULL));
-    } else {
-      g_assert_not_reached ();
-    }
   }
 
   g_free (pad_name);
@@ -763,6 +753,7 @@ gst_linker_set_property (GObject * object, guint prop_id,
   switch (prop_id) {
     case PROP_SINKPAD0:
       if (linker->sinkpad0 == NULL) {
+        g_free (linker->sinkpad0_config);
         linker->sinkpad0_config = g_value_dup_string (value);
         GST_INFO_OBJECT (linker, "sinkpad0: %s", linker->sinkpad0_config);
       } else {
@@ -773,6 +764,7 @@ gst_linker_set_property (GObject * object, guint prop_id,
       break;
     case PROP_SINKPAD1:
       if (linker->sinkpad1 == NULL) {
+        g_free (linker->sinkpad1_config);
         linker->sinkpad1_config = g_value_dup_string (value);
         GST_INFO_OBJECT (linker, "sinkpad1: %s", linker->sinkpad1_config);
       } else {
@@ -783,6 +775,7 @@ gst_linker_set_property (GObject * object, guint prop_id,
       break;
     case PROP_SRCPAD0:
       if (linker->srcpad0 == NULL) {
+        g_free (linker->srcpad0_config);
         linker->srcpad0_config = g_value_dup_string (value);
         GST_INFO_OBJECT (linker, "srcpad0: %s", linker->srcpad0_config);
       } else {
@@ -793,6 +786,7 @@ gst_linker_set_property (GObject * object, guint prop_id,
       break;
     case PROP_SRCPAD1:
       if (linker->srcpad1 == NULL) {
+        g_free (linker->srcpad1_config);
         linker->srcpad1_config = g_value_dup_string (value);
         GST_INFO_OBJECT (linker, "srcpad1: %s", linker->srcpad1_config);
       } else {
@@ -948,8 +942,7 @@ typedef enum
 {
   PAD_PRESENCE_MASK = 0x1,
   PAD_LINKABILITY_MASK = 0x2,
-  PAD_PRELINKING_MASK = 0x4,
-  PAD_COMBINATIONS = 0x8,
+  PAD_COMBINATIONS = 0x4,
   PAD_UNSPECIFIED,
 } PadConfig;
 
@@ -972,11 +965,6 @@ build_pad_config (PadConfig config)
     g_string_append (str, ",linkable");
   else
     g_string_append (str, ",unlinkable");
-
-  if (config & PAD_PRELINKING_MASK)
-    g_string_append (str, ",linked");
-  else
-    g_string_append (str, ",unlinked");
 
   return g_string_free (str, FALSE);
 }

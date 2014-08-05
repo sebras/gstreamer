@@ -250,7 +250,8 @@ _fail_unless (int result, const char *file, int line, const char *expr, ...)
 #ifdef _POSIX_VERSION
       _exit (1);
 #endif /* _POSIX_VERSION */
-    }
+    } else
+      abort ();
   }
 }
 
