@@ -911,8 +911,9 @@ gst_element_request_compatible_pad (GstElement * element,
     pad = gst_element_get_pad_from_template (element, templ_new);
 
   /* This can happen for non-request pads. No need to unref. */
-  if (pad && GST_PAD_PEER (pad))
+  if (pad && GST_PAD_PEER (pad)) {
     pad = NULL;
+  }
 
   return pad;
 }
@@ -1548,8 +1549,6 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
   srcrequest = FALSE;
   destrequest = FALSE;
 
-  GST_DEBUG ("%d %d", srcrequest, destrequest);
-
   /* get a src pad */
   if (srcpadname) {
     /* name specified, look it up */
@@ -1595,8 +1594,11 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
     if (!destpad) {
       GST_CAT_DEBUG (GST_CAT_ELEMENT_PADS, "no pad %s:%s",
           GST_ELEMENT_NAME (dest), destpadname);
-      if (srcpad)
+      if (srcpad) {
+        if (srcrequest)
+          gst_element_release_request_pad (src, srcpad);
         gst_object_unref (srcpad);
+      }
       return FALSE;
     } else {
       if (!(GST_PAD_DIRECTION (destpad) == GST_PAD_SINK)) {
@@ -1604,6 +1606,8 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
             GST_DEBUG_PAD_NAME (destpad));
         if (srcpad)
           gst_object_unref (srcpad);
+        if (destrequest)
+          gst_element_release_request_pad (dest, destpad);
         gst_object_unref (destpad);
         return FALSE;
       }
@@ -1614,6 +1618,8 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
             GST_DEBUG_PAD_NAME (GST_PAD_PEER (destpad)));
         if (srcpad)
           gst_object_unref (srcpad);
+        if (destrequest)
+          gst_element_release_request_pad (dest, destpad);
         gst_object_unref (destpad);
         return FALSE;
       }
@@ -1634,6 +1640,13 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
 
     /* two explicitly specified pads */
     result = pad_link_maybe_ghosting (srcpad, destpad, flags);
+
+    if (!result) {
+      if (srcrequest)
+        gst_element_release_request_pad (src, srcpad);
+      if (destrequest)
+        gst_element_release_request_pad (dest, destpad);
+    }
 
     gst_object_unref (srcpad);
     gst_object_unref (destpad);
@@ -1671,6 +1684,11 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
         }
 
         if (temp) {
+          /* possibly a problem if the pad already exists..? */
+          if (GST_PAD_TEMPLATE_PRESENCE (GST_PAD_PAD_TEMPLATE (temp)) ==
+              GST_PAD_REQUEST) {
+            gst_element_release_request_pad (dest, temp);
+          }
           gst_object_unref (temp);
         }
       }
@@ -1692,8 +1710,11 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
       gst_object_unref (destpad);
     destpad = NULL;
   }
-  if (srcpad)
+  if (srcpad) {
+    if (srcrequest)
+      gst_element_release_request_pad (src, srcpad);
     gst_object_unref (srcpad);
+  }
   srcpad = NULL;
 
   if (destpad) {
@@ -1713,6 +1734,11 @@ gst_element_link_pads_full (GstElement * src, const gchar * srcpadname,
           return TRUE;
         }
         if (temp) {
+          /* possibly a problem if the pad already exists..? */
+          if (GST_PAD_TEMPLATE_PRESENCE (GST_PAD_PAD_TEMPLATE (temp)) ==
+              GST_PAD_REQUEST) {
+            gst_element_release_request_pad (src, temp);
+          }
           gst_object_unref (temp);
         }
       }
